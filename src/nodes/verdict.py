@@ -9,8 +9,12 @@ from pydantic import BaseModel, Field
 
 from src.llm import get_llm
 from src.models import Verdict
+from src.prompts import fence
 from src.state import FactCheckState
 
+# Both slots below carry text this system did not author: for URL input the
+# claim is scraped article text, and the findings quote retrieved URLs and
+# reasoning about scraped bodies. Both are fenced as data.
 _PROMPT_TEMPLATE = """You are issuing a fact-check verdict.
 
 CLAIM:
@@ -61,7 +65,10 @@ def verdict_node(state: FactCheckState) -> dict:
     )
     llm = get_llm().with_structured_output(VerdictDecision)
     decision = llm.invoke(
-        _PROMPT_TEMPLATE.format(claim=state["claim"], findings=findings)
+        _PROMPT_TEMPLATE.format(
+            claim=fence("claim-under-test", state.get("claim", "")),
+            findings=fence("stance-findings", findings),
+        )
     )
 
     return {

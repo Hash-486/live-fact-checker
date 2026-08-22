@@ -1,6 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from src.ingest import extract_claim_text, is_url
+from src.ingest import MAX_CLAIM_CHARS, extract_claim_text, is_url, reduce_to_claim
+
+LONG_ARTICLE = "Sentence number one is here. " * 400  # ~11,600 characters
 
 
 def test_detects_urls():
@@ -22,6 +24,31 @@ def test_url_is_fetched_and_extracted():
         "src.ingest.trafilatura.extract", return_value="Extracted body text."
     ):
         assert extract_claim_text("https://example.com/a") == "Extracted body text."
+
+
+def test_long_article_body_is_reduced_to_a_search_safe_claim():
+    # Tavily rejects queries over 400 characters, so a whole article body
+    # cannot be handed to it as a query.
+    metadata = MagicMock(title="Mayor denies budget claim")
+    with patch("src.ingest.trafilatura.fetch_url", return_value="<html/>"), patch(
+        "src.ingest.trafilatura.extract", return_value=LONG_ARTICLE
+    ), patch("src.ingest.trafilatura.extract_metadata", return_value=metadata):
+        claim = extract_claim_text("https://example.com/long")
+
+    assert len(claim) <= MAX_CLAIM_CHARS
+    assert claim.startswith("Mayor denies budget claim.")
+
+
+def test_short_claims_are_not_altered():
+    assert reduce_to_claim(None, "the sky is green") == "the sky is green"
+
+
+def test_reduction_cuts_on_a_word_boundary():
+    reduced = reduce_to_claim(None, LONG_ARTICLE)
+
+    assert len(reduced) <= MAX_CLAIM_CHARS
+    assert not reduced.endswith("Sen")
+    assert LONG_ARTICLE.startswith(reduced)
 
 
 def test_unfetchable_url_raises_clear_error():
