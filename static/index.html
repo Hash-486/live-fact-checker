@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Fact Checker</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      max-width: 46rem; margin: 0 auto; padding: 2rem 1rem; line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; }
+    form { display: flex; gap: .5rem; margin-bottom: 1.5rem; }
+    input { flex: 1; padding: .6rem; font-size: 1rem; }
+    button { padding: .6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    .step {
+      border-left: 3px solid #888; padding: .5rem .75rem;
+      margin-bottom: .75rem; opacity: 0; animation: fade .3s forwards;
+    }
+    @keyframes fade { to { opacity: 1; } }
+    .node { font-weight: 600; text-transform: uppercase; font-size: .75rem;
+            letter-spacing: .05em; }
+    pre { overflow-x: auto; font-size: .8rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Live Fact Checker</h1>
+  <form id="form">
+    <input id="claim" placeholder="Paste a claim or article URL" required />
+    <button type="submit">Check</button>
+  </form>
+  <div id="trace"></div>
+
+  <script>
+    const form = document.getElementById("form");
+    const trace = document.getElementById("trace");
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      trace.innerHTML = "";
+      const claim = document.getElementById("claim").value;
+      const source = new EventSource(
+        "/fact-check/stream?claim=" + encodeURIComponent(claim)
+      );
+
+      source.onmessage = (message) => {
+        const data = JSON.parse(message.data);
+        if (data.event === "done") { source.close(); return; }
+        const step = document.createElement("div");
+        step.className = "step";
+        step.innerHTML =
+          '<div class="node"></div><pre></pre>';
+        step.querySelector(".node").textContent = data.node;
+        step.querySelector("pre").textContent =
+          JSON.stringify(data.payload, null, 2);
+        trace.appendChild(step);
+      };
+
+      source.onerror = () => source.close();
+    });
+  </script>
+</body>
+</html>
