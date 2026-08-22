@@ -22,6 +22,7 @@
     .node { font-weight: 600; text-transform: uppercase; font-size: .75rem;
             letter-spacing: .05em; }
     pre { overflow-x: auto; font-size: .8rem; white-space: pre-wrap; }
+    .step-error { border-left-color: #c0392b; color: #c0392b; }
   </style>
 </head>
 <body>
@@ -47,6 +48,14 @@
       source.onmessage = (message) => {
         const data = JSON.parse(message.data);
         if (data.event === "done") { source.close(); return; }
+        if (data.event === "error") {
+          const step = document.createElement("div");
+          step.className = "step step-error";
+          step.textContent = "Error: " + data.detail;
+          trace.appendChild(step);
+          source.close();
+          return;
+        }
         const step = document.createElement("div");
         step.className = "step";
         step.innerHTML =

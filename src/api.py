@@ -45,13 +45,27 @@ def fact_check(request: ClaimRequest) -> FactCheckResult:
 
 
 async def stream_fact_check(claim: str) -> AsyncIterator[str]:
-    """Emit one Server-Sent Event per completed graph node, then 'done'."""
+    """Emit one Server-Sent Event per completed graph node, then 'done'.
+
+    If a node raises (rate limit, transient network error, a bad
+    structured-output parse — any of these are normal operation, not
+    edge cases), emit a single 'error' event and stop. 'error' is itself
+    the terminal signal for the stream: no 'done' event follows it,
+    because 'done' means the run completed successfully. A client only
+    ever sees exactly one of the two.
+    """
     graph = build_graph()
-    async for update in graph.astream({"raw_input": claim}):
-        for node_name, payload in update.items():
-            yield "data: " + json.dumps(
-                {"node": node_name, "payload": _encode(payload)}
-            ) + "\n\n"
+    try:
+        async for update in graph.astream({"raw_input": claim}):
+            for node_name, payload in update.items():
+                yield "data: " + json.dumps(
+                    {"node": node_name, "payload": _encode(payload)}
+                ) + "\n\n"
+    except Exception as exc:
+        yield "data: " + json.dumps(
+            {"event": "error", "detail": str(exc)}
+        ) + "\n\n"
+        return
     yield "data: " + json.dumps({"event": "done"}) + "\n\n"
 
 
