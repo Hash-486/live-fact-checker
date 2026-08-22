@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from src.config import Settings
-from src.search import search_evidence
+from src.search import MAX_CONTENT_CHARS, SEARCH_TIMEOUT_SECONDS, search_evidence
 
 
 def _settings() -> Settings:
@@ -63,6 +63,34 @@ def test_passes_top_n_to_tavily():
         search_evidence("q", _settings())
 
     assert client.search.call_args.kwargs["max_results"] == 2
+
+
+def test_passes_an_explicit_timeout_to_tavily():
+    client = MagicMock()
+    client.search.return_value = {"results": []}
+    with patch("src.search.TavilyClient", return_value=client):
+        search_evidence("q", _settings())
+
+    assert client.search.call_args.kwargs["timeout"] == SEARCH_TIMEOUT_SECONDS
+
+
+def test_raw_content_is_bounded_before_it_enters_the_state():
+    # Untruncated bodies otherwise ride in the API response and the SSE wire.
+    client = MagicMock()
+    client.search.return_value = {
+        "results": [
+            {
+                "url": "https://long.example/a",
+                "title": "Long",
+                "content": "snippet",
+                "raw_content": "x" * 200_000,
+            }
+        ]
+    }
+    with patch("src.search.TavilyClient", return_value=client):
+        docs = search_evidence("q", _settings())
+
+    assert len(docs[0].content) == MAX_CONTENT_CHARS
 
 
 def test_empty_results_return_empty_list():

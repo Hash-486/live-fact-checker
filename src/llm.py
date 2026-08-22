@@ -12,6 +12,12 @@ from langchain_core.language_models import BaseChatModel
 
 from src.config import Settings, get_settings
 
+# The Anthropic SDK's default request timeout is 600 seconds. One hung call
+# would pin an SSE connection for ten minutes with the UI showing nothing,
+# so the wait is bounded explicitly. Generous for this workload: the batched
+# stance call is the longest, and it is one call over a handful of documents.
+LLM_TIMEOUT_SECONDS = 120
+
 
 def get_llm(settings: Settings | None = None) -> BaseChatModel:
     """Return the configured chat model. Nodes must not name a provider."""
@@ -30,6 +36,7 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
             model=settings.llm_model,
             api_key=settings.anthropic_api_key,
             max_tokens=8000,
+            timeout=LLM_TIMEOUT_SECONDS,
         )
 
     if settings.llm_backend == "ollama":
@@ -37,7 +44,12 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
 
         # Fail loudly if unreachable — never silently fall back to Anthropic.
         # A silent swap makes results non-reproducible.
-        return ChatOllama(model=settings.ollama_model)
+        # ChatOllama has no timeout field of its own; the httpx client it
+        # builds takes one.
+        return ChatOllama(
+            model=settings.ollama_model,
+            client_kwargs={"timeout": LLM_TIMEOUT_SECONDS},
+        )
 
     raise ValueError(
         f"Unknown LLM_BACKEND {settings.llm_backend!r}. "

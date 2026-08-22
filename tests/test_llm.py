@@ -1,7 +1,7 @@
 import pytest
 
 from src.config import Settings
-from src.llm import get_llm
+from src.llm import LLM_TIMEOUT_SECONDS, get_llm
 
 
 def _settings(**overrides) -> Settings:
@@ -26,6 +26,13 @@ def test_returns_anthropic_client_for_anthropic_backend():
 def test_returns_ollama_client_for_ollama_backend():
     llm = get_llm(_settings(llm_backend="ollama"))
     assert type(llm).__name__ == "ChatOllama"
+
+
+def test_anthropic_client_bounds_its_request_timeout():
+    # The SDK default is 600s, long enough to pin an SSE connection for ten
+    # minutes on a single hung call.
+    llm = get_llm(_settings())
+    assert llm.default_request_timeout == LLM_TIMEOUT_SECONDS
 
 
 def test_unknown_backend_fails_loudly():
