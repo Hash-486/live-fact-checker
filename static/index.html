@@ -23,6 +23,19 @@
             letter-spacing: .05em; }
     pre { overflow-x: auto; font-size: .8rem; white-space: pre-wrap; }
     .step-error { border-left-color: #c0392b; color: #c0392b; }
+    .card {
+      border: 1px solid #888; border-radius: .4rem; padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem; opacity: 0; animation: fade .3s forwards;
+    }
+    .card h2 { font-size: 1.75rem; margin: 0; letter-spacing: .02em; }
+    .card .confidence { font-size: .85rem; opacity: .75; margin: .15rem 0 .75rem; }
+    .card .reasoning { margin: 0 0 1rem; }
+    .card h3 { font-size: .75rem; text-transform: uppercase; margin: 0 0 .4rem;
+               letter-spacing: .05em; opacity: .75; }
+    .card ol { margin: 0; padding-left: 1.25rem; font-size: .9rem; }
+    .card li { margin-bottom: .4rem; }
+    .card .stance { font-size: .7rem; text-transform: uppercase;
+                    letter-spacing: .05em; opacity: .75; }
   </style>
 </head>
 <body>
@@ -31,42 +44,123 @@
     <input id="claim" placeholder="Paste a claim or article URL" required />
     <button type="submit">Check</button>
   </form>
+  <div id="verdict"></div>
   <div id="trace"></div>
 
   <script>
     const form = document.getElementById("form");
     const trace = document.getElementById("trace");
+    const verdictSlot = document.getElementById("verdict");
+
+    // Everything below is scraped web content. Nothing is ever assigned via
+    // innerHTML, and an href is only set for an http(s) URL, so a page
+    // serving a `javascript:` link cannot get it into the DOM as one.
+    const el = (tag, className, text) => {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+
+    const httpUrl = (value) =>
+      typeof value === "string" && /^https?:\/\//i.test(value) ? value : null;
+
+    const errorStep = (text) => {
+      trace.appendChild(el("div", "step step-error", text));
+    };
+
+    function renderVerdict(payload, documents, judgments) {
+      const card = el("div", "card");
+      card.appendChild(el("h2", null, String(payload.verdict || "").toUpperCase()));
+
+      const confidence = Number(payload.confidence);
+      card.appendChild(
+        el(
+          "p",
+          "confidence",
+          Number.isFinite(confidence)
+            ? "Confidence " + Math.round(confidence * 100) + "%"
+            : "Confidence unavailable"
+        )
+      );
+      card.appendChild(el("p", "reasoning", payload.reasoning || ""));
+
+      if (documents.length) {
+        card.appendChild(el("h3", null, "Sources"));
+        const list = el("ol");
+        const stanceByUrl = new Map(
+          judgments.map((judgment) => [judgment.url, judgment.stance])
+        );
+        for (const doc of documents) {
+          const item = el("li");
+          const href = httpUrl(doc.url);
+          if (href) {
+            const link = el("a", null, doc.title || doc.url);
+            link.href = href;
+            link.rel = "noopener noreferrer";
+            link.target = "_blank";
+            item.appendChild(link);
+          } else {
+            item.appendChild(el("span", null, doc.title || doc.url || ""));
+          }
+          const stance = stanceByUrl.get(doc.url);
+          if (stance) {
+            item.appendChild(document.createTextNode(" "));
+            item.appendChild(el("span", "stance", "[" + stance + "]"));
+          }
+          list.appendChild(item);
+        }
+        card.appendChild(list);
+      }
+
+      verdictSlot.appendChild(card);
+    }
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      trace.innerHTML = "";
+      trace.textContent = "";
+      verdictSlot.textContent = "";
       const claim = document.getElementById("claim").value;
       const source = new EventSource(
         "/fact-check/stream?claim=" + encodeURIComponent(claim)
       );
 
+      // The verdict node emits only verdict/confidence/reasoning, so the
+      // card's sources are joined from the earlier search and stance events.
+      let documents = [];
+      let judgments = [];
+      let finished = false;
+
       source.onmessage = (message) => {
         const data = JSON.parse(message.data);
-        if (data.event === "done") { source.close(); return; }
+        if (data.event === "done") { finished = true; source.close(); return; }
         if (data.event === "error") {
-          const step = document.createElement("div");
-          step.className = "step step-error";
-          step.textContent = "Error: " + data.detail;
-          trace.appendChild(step);
+          finished = true;
+          errorStep("Error: " + data.detail);
           source.close();
           return;
         }
-        const step = document.createElement("div");
-        step.className = "step";
-        step.innerHTML =
-          '<div class="node"></div><pre></pre>';
-        step.querySelector(".node").textContent = data.node;
-        step.querySelector("pre").textContent =
-          JSON.stringify(data.payload, null, 2);
+
+        const payload = data.payload || {};
+        if (data.node === "search") documents = payload.documents || [];
+        if (data.node === "stance") judgments = payload.judgments || [];
+
+        const step = el("div", "step");
+        step.appendChild(el("div", "node", data.node));
+        step.appendChild(el("pre", null, JSON.stringify(payload, null, 2)));
         trace.appendChild(step);
+
+        if (data.node === "verdict") {
+          renderVerdict(payload, documents, judgments);
+        }
       };
 
-      source.onerror = () => source.close();
+      source.onerror = () => {
+        // Closing silently left the trace frozen with no explanation.
+        if (!finished) errorStep("Connection to the fact checker was lost.");
+        finished = true;
+        source.close();
+      };
     });
   </script>
 </body>
