@@ -5,7 +5,7 @@ document would mean six round-trips before the verdict node even starts.
 """
 
 from src.llm import get_llm
-from src.models import SourceDocument, StanceReport
+from src.models import SourceDocument, Stance, StanceJudgment, StanceReport
 from src.prompts import fence
 from src.state import FactCheckState
 
@@ -33,6 +33,14 @@ Return one judgment per document, using the document's exact URL.
 # section carries the stance in nearly all cases.
 _MAX_CHARS_PER_DOCUMENT = 4000
 
+# A document the model returned no judgment for is recorded rather than
+# dropped, so `judgments` always lines up one-to-one with `documents` and
+# confidence is not computed over a silently incomplete sample.
+_OMITTED_REASONING = (
+    "The stance classifier returned no judgment for this retrieved document, "
+    "so it is recorded as unrelated rather than silently omitted."
+)
+
 
 def build_stance_prompt(claim: str, documents: list[SourceDocument]) -> str:
     """Build the batched stance prompt with untrusted content fenced off."""
@@ -50,6 +58,35 @@ def build_stance_prompt(claim: str, documents: list[SourceDocument]) -> str:
     )
 
 
+def reconcile_judgments(
+    judgments: list[StanceJudgment], documents: list[SourceDocument]
+) -> list[StanceJudgment]:
+    """Force the model's judgments to line up with what was actually retrieved.
+
+    Every URL in a judgment is a string the model produced. Unchecked, a
+    hallucinated one flows straight into the result's citations. So: drop
+    judgments for URLs that were never retrieved, keep the first of any
+    duplicates rather than double-weighting one document, and stand in a
+    neutral judgment for documents the model skipped.
+
+    The document's URL is what survives, never the model's copy of it, so
+    the returned list can only ever cite something that was retrieved.
+    """
+    documents_by_url = {doc.url: doc for doc in documents}
+    first_by_url: dict[str, StanceJudgment] = {}
+    for judgment in judgments:
+        if judgment.url in documents_by_url and judgment.url not in first_by_url:
+            first_by_url[judgment.url] = judgment
+
+    return [
+        first_by_url.get(url)
+        or StanceJudgment(
+            url=url, stance=Stance.UNRELATED, reasoning=_OMITTED_REASONING
+        )
+        for url in documents_by_url
+    ]
+
+
 def stance_node(state: FactCheckState) -> dict:
     """Judge every retrieved document's stance in a single LLM call."""
     documents = state.get("documents", [])
@@ -58,4 +95,4 @@ def stance_node(state: FactCheckState) -> dict:
 
     llm = get_llm().with_structured_output(StanceReport)
     report = llm.invoke(build_stance_prompt(state.get("claim", ""), documents))
-    return {"judgments": report.judgments}
+    return {"judgments": reconcile_judgments(report.judgments, documents)}

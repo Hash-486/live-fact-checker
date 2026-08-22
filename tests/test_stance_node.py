@@ -63,3 +63,73 @@ def test_a_quote_in_a_scraped_title_cannot_break_out_of_the_attribute():
 
     assert 'trusted="yes"' not in prompt
     assert "&quot;" in prompt
+
+
+def _run_stance_with(report: StanceReport, documents=DOCS) -> list:
+    structured = MagicMock()
+    structured.invoke.return_value = report
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    with patch("src.nodes.stance.get_llm", return_value=llm):
+        return stance_node({"claim": "c", "documents": documents})["judgments"]
+
+
+def test_a_hallucinated_url_never_reaches_the_output():
+    judgments = _run_stance_with(
+        StanceReport(
+            judgments=[
+                StanceJudgment(
+                    url="https://a.com", stance=Stance.SUPPORTS, reasoning="r"
+                ),
+                StanceJudgment(
+                    url="https://hallucinated.com",
+                    stance=Stance.REFUTES,
+                    reasoning="invented source",
+                ),
+                StanceJudgment(
+                    url="https://b.com", stance=Stance.REFUTES, reasoning="r"
+                ),
+            ]
+        )
+    )
+
+    assert [j.url for j in judgments] == ["https://a.com", "https://b.com"]
+
+
+def test_duplicate_urls_are_collapsed_keeping_the_first():
+    judgments = _run_stance_with(
+        StanceReport(
+            judgments=[
+                StanceJudgment(
+                    url="https://a.com", stance=Stance.SUPPORTS, reasoning="first"
+                ),
+                StanceJudgment(
+                    url="https://a.com", stance=Stance.REFUTES, reasoning="second"
+                ),
+                StanceJudgment(
+                    url="https://b.com", stance=Stance.REFUTES, reasoning="r"
+                ),
+            ]
+        )
+    )
+
+    assert [j.url for j in judgments] == ["https://a.com", "https://b.com"]
+    assert judgments[0].reasoning == "first"
+
+
+def test_a_document_the_model_skipped_is_recorded_as_unrelated():
+    judgments = _run_stance_with(
+        StanceReport(
+            judgments=[
+                StanceJudgment(
+                    url="https://a.com", stance=Stance.SUPPORTS, reasoning="r"
+                )
+            ]
+        )
+    )
+
+    # One judgment per retrieved document, so confidence downstream is not
+    # computed over a silently incomplete sample.
+    assert [j.url for j in judgments] == ["https://a.com", "https://b.com"]
+    assert judgments[1].stance == Stance.UNRELATED
+    assert "no judgment" in judgments[1].reasoning
