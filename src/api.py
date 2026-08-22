@@ -2,15 +2,37 @@
 
 import json
 from collections.abc import AsyncIterator
+from enum import Enum
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import AfterValidator, BaseModel, field_validator
 
 from src.graph import build_graph, run_fact_check
 from src.models import FactCheckResult
+
+# Resolved from this file, not the process CWD: StaticFiles validates the
+# directory at construction, so a relative path made `import src.api` raise
+# RuntimeError from anywhere but the repo root.
+STATIC_DIR = Path(__file__).parent.parent / "static"
+
+# The two endpoints are two clients of one pipeline and must not have two
+# input contracts. This mirrors ClaimRequest's validation for the query param.
+MAX_CLAIM_LENGTH = 2000
+
+# Without these, nginx and most PaaS proxies buffer the whole stream and
+# deliver it as one blocking response -- exactly the single blocking spinner
+# that throws away the visible-tradecraft point of streaming. Local uvicorn
+# does not buffer, which is why this is invisible in development.
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 app = FastAPI(title="Live Fact Checker")
 
@@ -23,15 +45,27 @@ app.add_middleware(
 )
 
 
+def _must_not_be_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("claim must not be empty")
+    return value
+
+
 class ClaimRequest(BaseModel):
     claim: str
 
-    @field_validator("claim")
-    @classmethod
-    def must_not_be_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("claim must not be empty")
-        return value
+    _validate_claim = field_validator("claim")(_must_not_be_blank)
+
+
+# The streaming endpoint previously took a bare `claim: str` with no
+# validation at all, so GET /fact-check/stream?claim= ran the whole graph on
+# an empty string that POST /fact-check rejects. Sharing the validator makes
+# one contract rather than two.
+ClaimQuery = Annotated[
+    str,
+    Query(min_length=1, max_length=MAX_CLAIM_LENGTH),
+    AfterValidator(_must_not_be_blank),
+]
 
 
 @app.get("/health")
@@ -77,16 +111,18 @@ def _encode(payload: object) -> object:
         return [_encode(item) for item in payload]
     if hasattr(payload, "model_dump"):
         return payload.model_dump()
-    if hasattr(payload, "value"):
+    if isinstance(payload, Enum):
         return payload.value
     return payload
 
 
 @app.get("/fact-check/stream")
-async def fact_check_stream(claim: str) -> StreamingResponse:
+async def fact_check_stream(claim: ClaimQuery) -> StreamingResponse:
     return StreamingResponse(
-        stream_fact_check(claim), media_type="text/event-stream"
+        stream_fact_check(claim),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
     )
 
 
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

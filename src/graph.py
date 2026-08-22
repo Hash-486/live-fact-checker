@@ -1,5 +1,7 @@
 """LangGraph assembly: normalize -> search -> stance -> verdict."""
 
+from functools import cache
+
 from langgraph.graph import END, START, StateGraph
 
 from src.models import FactCheckResult, Verdict
@@ -10,8 +12,15 @@ from src.nodes.verdict import verdict_node
 from src.state import FactCheckState
 
 
+@cache
 def build_graph():
-    """Wire the nodes into a compiled, runnable graph."""
+    """Return the compiled graph, wiring and compiling it on first use.
+
+    The wiring never varies, so the StateGraph is compiled once for the
+    process rather than on every request. Memoizing the existing function
+    rather than assigning a module-level constant keeps `build_graph` itself
+    the seam the callers and tests already patch and call.
+    """
     builder = StateGraph(FactCheckState)
 
     builder.add_node("normalize", normalize_node)
@@ -33,7 +42,9 @@ def run_fact_check(raw_input: str) -> FactCheckResult:
     final_state = build_graph().invoke({"raw_input": raw_input})
 
     return FactCheckResult(
-        claim=final_state["claim"],
+        # Every sibling below reads defensively; this one raised KeyError
+        # inside result construction if the node had not populated it.
+        claim=final_state.get("claim", raw_input),
         verdict=final_state.get("verdict", Verdict.UNVERIFIED),
         confidence=final_state.get("confidence", 0.0),
         reasoning=final_state.get("reasoning", ""),

@@ -1,7 +1,8 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from src.models import SourceDocument, Stance, StanceJudgment, Verdict
+from src.models import SourceDocument, Stance, StanceJudgment, StanceReport, Verdict
 from src.graph import build_graph, run_fact_check
+from src.nodes.verdict import VerdictDecision
 
 DOC = SourceDocument(url="https://a.com", title="A", snippet="s", content="body")
 JUDGMENT = StanceJudgment(
@@ -19,29 +20,40 @@ def test_graph_compiles_with_all_four_nodes():
     }
 
 
+def test_build_graph_compiles_once_per_process():
+    assert build_graph() is build_graph()
+
+
+def _structured_llm(*returns):
+    """An LLM stub whose structured-output calls return `returns` in order."""
+    structured = MagicMock()
+    structured.invoke.side_effect = list(returns)
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    return llm
+
+
 def test_end_to_end_flow_produces_a_result():
-    # NOTE ON PATCH TARGETS: all four names are from-imports, so each must be
-    # patched where the binding lives, not where it was originally defined.
-    # `src/graph.py` does `from src.nodes.stance import stance_node` (and
-    # likewise for verdict_node), so those are patched at
-    # "src.graph.stance_node" / "src.graph.verdict_node". The normalize and
-    # search nodes call `extract_claim_text` / `search_evidence` for real, so
-    # those are patched at the modules that import them:
-    # "src.nodes.normalize.extract_claim_text" and
-    # "src.nodes.search_node.search_evidence".
+    # NOTE ON PATCH TARGETS: the graph is compiled once per process, so the
+    # node callables are captured at compile time and patching
+    # "src.graph.stance_node" no longer reaches the compiled graph. Each node
+    # is therefore mocked at its own outside edge -- the seam that survives
+    # compilation -- which also means the real node bodies run here rather
+    # than the test asserting a mock's own return value.
     with patch("src.nodes.normalize.extract_claim_text", return_value="claim x"), patch(
         "src.nodes.search_node.search_evidence", return_value=[DOC]
-    ), patch("src.graph.stance_node", return_value={"judgments": [JUDGMENT]}):
-        with patch(
-            "src.graph.verdict_node",
-            return_value={
-                "verdict": Verdict.FALSE,
-                "confidence": 0.9,
-                "reasoning": "refuted",
-            },
-        ):
-            result = run_fact_check("claim x")
+    ), patch(
+        "src.nodes.stance.get_llm",
+        return_value=_structured_llm(StanceReport(judgments=[JUDGMENT])),
+    ), patch(
+        "src.nodes.verdict.get_llm",
+        return_value=_structured_llm(
+            VerdictDecision(verdict=Verdict.FALSE, confidence=0.9, reasoning="refuted")
+        ),
+    ):
+        result = run_fact_check("claim x")
 
     assert result.claim == "claim x"
     assert result.verdict == Verdict.FALSE
     assert result.sources == [DOC]
+    assert result.judgments == [JUDGMENT]
