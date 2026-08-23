@@ -18,6 +18,22 @@ from src.config import Settings, get_settings
 # stance call is the longest, and it is one call over a handful of documents.
 LLM_TIMEOUT_SECONDS = 120
 
+# Ollama allocates a 4096-token context by default, regardless of what the
+# model reports it can handle (llama3.1:8b advertises 131072). The batched
+# stance prompt runs ~6800 tokens for six documents, so the default silently
+# truncates it — and a truncated prompt does not fail, it just yields
+# judgments for the handful of documents that survived, plus invented URLs
+# assembled from fragments. Measured on llama3.1:8b, claim "the moon landing
+# was faked": 1 of 6 documents judged at the default, 6 of 6 at 16384.
+# 16384 tokens of KV cache is ~2GB on top of a 4.9GB Q4_K_M model, which
+# fits the 8GB VRAM target with headroom.
+OLLAMA_NUM_CTX = 16384
+
+# Stance classification and verdict synthesis are classification tasks, not
+# creative ones. Ollama's default temperature of 0.8 adds sampling noise to
+# a decision that should be reproducible for the same evidence.
+OLLAMA_TEMPERATURE = 0.0
+
 
 def get_llm(settings: Settings | None = None) -> BaseChatModel:
     """Return the configured chat model. Nodes must not name a provider."""
@@ -48,6 +64,8 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
         # builds takes one.
         return ChatOllama(
             model=settings.ollama_model,
+            num_ctx=OLLAMA_NUM_CTX,
+            temperature=OLLAMA_TEMPERATURE,
             client_kwargs={"timeout": LLM_TIMEOUT_SECONDS},
         )
 
