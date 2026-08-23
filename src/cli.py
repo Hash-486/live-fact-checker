@@ -40,13 +40,12 @@ def format_result(result: FactCheckResult) -> str:
 def _use_utf8_output() -> None:
     """Stop the Windows console codec from crashing on scraped text.
 
-    Verdicts quote retrieved web content, which routinely carries characters
-    cp1252 cannot encode — zero-width spaces, curly quotes, em dashes,
-    accented names. On Windows `print` then dies with a UnicodeEncodeError
-    after the whole pipeline has already run and been paid for. Reconfiguring
-    is cheap, and `errors="replace"` degrades a stray glyph instead of losing
-    the verdict. No-ops on a stream that does not support it (a pipe under
-    test, for instance).
+    Verdicts quote retrieved web content, which routinely has characters
+    cp1252 can't encode (zero-width spaces, curly quotes, accented names).
+    On Windows `print` then dies with a UnicodeEncodeError after the whole
+    pipeline has already run. `errors="replace"` degrades a stray glyph
+    instead of losing the verdict. No-ops on a stream that doesn't support
+    reconfigure (a pipe under test).
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

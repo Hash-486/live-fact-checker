@@ -1,4 +1,4 @@
-"""Node 4 — synthesize a verdict from the stance judgments.
+"""Node 4: synthesize a verdict from the stance judgments.
 
 "unverified" is a first-class outcome, not a failure. Most fake-news systems
 force a confident label onto ambiguous claims; refusing to do that is the

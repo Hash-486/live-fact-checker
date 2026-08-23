@@ -25,9 +25,8 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 MAX_CLAIM_LENGTH = 2000
 
 # Without these, nginx and most PaaS proxies buffer the whole stream and
-# deliver it as one blocking response -- exactly the single blocking spinner
-# that throws away the visible-tradecraft point of streaming. Local uvicorn
-# does not buffer, which is why this is invisible in development.
+# deliver it as one blocking response, which defeats the point of streaming.
+# Local uvicorn doesn't buffer, so this is invisible in development.
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
@@ -82,11 +81,9 @@ async def stream_fact_check(claim: str) -> AsyncIterator[str]:
     """Emit one Server-Sent Event per completed graph node, then 'done'.
 
     If a node raises (rate limit, transient network error, a bad
-    structured-output parse — any of these are normal operation, not
-    edge cases), emit a single 'error' event and stop. 'error' is itself
-    the terminal signal for the stream: no 'done' event follows it,
-    because 'done' means the run completed successfully. A client only
-    ever sees exactly one of the two.
+    structured-output parse, these are normal operation here, not edge
+    cases), emit a single 'error' event and stop. No 'done' follows an
+    'error': a client only ever sees exactly one of the two.
     """
     graph = build_graph()
     try:

@@ -1,4 +1,4 @@
-"""Node 1 — turn raw input into a claim string."""
+"""Node 1: turn raw input into a claim string."""
 
 from src.ingest import extract_claim_text
 from src.state import FactCheckState

@@ -1,4 +1,4 @@
-"""Node 3 — classify each retrieved document's stance toward the claim.
+"""Node 3: classify each retrieved document's stance toward the claim.
 
 All documents are judged in ONE structured-output call. One call per
 document would mean six round-trips before the verdict node even starts.

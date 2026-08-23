@@ -1,13 +1,13 @@
 """Shared prompt-construction helpers.
 
-Every prompt in this project interpolates text the system did not author —
-scraped article bodies, page titles, and user-supplied claims that may
-themselves be scraped article text. A Global Constraint of the plan requires
-all of it to be delimited and labelled as data rather than instructions.
+Every prompt here interpolates text the system did not author: scraped
+article bodies, page titles, user-supplied claims that may themselves be
+scraped article text. All of it needs to be delimited and labelled as data,
+not instructions.
 
-Fencing lives here, in one place, so that constraint is mechanically
-checkable instead of a convention each prompt re-implements. This module
-imports nothing from `src.nodes`, so node modules can import it freely.
+Fencing lives here so it's one place to check instead of a convention each
+prompt re-implements. Imports nothing from `src.nodes`, so node modules can
+import it freely.
 """
 
 from html import escape
@@ -33,9 +33,9 @@ def fence(label: str, text: str, **attributes: str) -> str:
         f' {name}="{escape(str(value), quote=True)}"'
         for name, value in attributes.items()
     )
-    # The body is left otherwise intact — escaping it wholesale would mangle
-    # the article text the model has to read — but the one sequence that
-    # could close the fence early is neutralized.
+    # Body is left otherwise intact (escaping it wholesale would mangle the
+    # article text the model has to read), but the one sequence that could
+    # close the fence early gets neutralized.
     body = text.replace("</untrusted-data>", "<\\/untrusted-data>")
     return (
         f'<untrusted-data label="{escape(label, quote=True)}"{rendered}>\n'

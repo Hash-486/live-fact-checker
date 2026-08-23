@@ -1,4 +1,4 @@
-"""Node 2 — retrieve live evidence for the claim."""
+"""Node 2: retrieve live evidence for the claim."""
 
 from src.search import search_evidence
 from src.state import FactCheckState

@@ -13,12 +13,12 @@ from src.models import SourceDocument
 # hung search otherwise leaves an SSE connection open with nothing on screen.
 SEARCH_TIMEOUT_SECONDS = 60
 
-# Tavily's raw_content is a full article body. The 4,000-character cap in the
-# stance prompt applies only inside that prompt, so untruncated bodies were
+# Tavily's raw_content is a full article body. The 4,000-char cap in the
+# stance prompt only applies inside that prompt, so untruncated bodies were
 # still riding in the graph state, the POST /fact-check response, and the
-# `search` SSE event -- six full articles serialized to the page, and the
-# Stage 6 extension will consume this over mobile. Bound it at ingest, well
-# above what the prompt uses so nothing the model reads is lost.
+# `search` SSE event, six full articles serialized to the page. Bound it
+# here too, well above what the prompt uses so nothing the model reads is
+# lost.
 MAX_CONTENT_CHARS = 8000
 
 
