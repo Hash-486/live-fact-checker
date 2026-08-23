@@ -9,3 +9,6 @@ data/processed/*
 data/results/*
 models/*.pkl
 models/*.pth
+
+# local planning notes, not part of the repo
+plan.md
