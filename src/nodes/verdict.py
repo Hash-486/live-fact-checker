@@ -5,10 +5,12 @@ force a confident label onto ambiguous claims; refusing to do that is the
 point.
 """
 
+from collections import Counter
+
 from pydantic import BaseModel, Field
 
 from src.llm import get_llm
-from src.models import Verdict
+from src.models import Stance, StanceJudgment, Verdict
 from src.prompts import fence
 from src.state import FactCheckState
 
@@ -19,6 +21,9 @@ _PROMPT_TEMPLATE = """You are issuing a fact-check verdict.
 
 CLAIM:
 {claim}
+
+STANCE TALLY (counted for you — trust these numbers over your own count):
+{tally}
 
 STANCE FINDINGS FROM RETRIEVED SOURCES:
 {findings}
@@ -32,6 +37,15 @@ Choose exactly one verdict:
 - "contested": credible sources genuinely disagree
 - "unverified": evidence is too thin or conflicting to judge
 
+How to read the tally:
+- "unrelated" sources are NOT disagreement. They carry no weight either
+  way. Ignore them when deciding between true, false, and contested.
+- "contested" requires genuine disagreement: at least one source
+  supporting AND at least one refuting. If every source that took a
+  position agreed, the verdict is "true" or "false", never "contested".
+- If nothing supports and at least one source refutes, it is "false".
+- If no source took any position at all, it is "unverified".
+
 Do not force confidence you do not have. "unverified" is a correct and
 expected answer when the evidence does not support a conclusion.
 
@@ -44,6 +58,12 @@ class VerdictDecision(BaseModel):
     verdict: Verdict
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
+
+
+def _build_tally(judgments: list[StanceJudgment]) -> str:
+    """Count each stance so the model never has to do the arithmetic."""
+    counts = Counter(j.stance for j in judgments)
+    return chr(10).join(f"- {s.value}: {counts.get(s, 0)}" for s in Stance)
 
 
 def verdict_node(state: FactCheckState) -> dict:
@@ -67,6 +87,11 @@ def verdict_node(state: FactCheckState) -> dict:
     decision = llm.invoke(
         _PROMPT_TEMPLATE.format(
             claim=fence("claim-under-test", state.get("claim", "")),
+            # This system's own arithmetic over the judgments, so it is
+            # trusted and stays outside the fence. Smaller models count
+            # unreliably and read "not unanimous" as "disputed"; handing
+            # them the counts removes arithmetic from the reasoning task.
+            tally=_build_tally(judgments),
             findings=fence("stance-findings", findings),
         )
     )
